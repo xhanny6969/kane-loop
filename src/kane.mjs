@@ -44,18 +44,14 @@ export function summarize(events, exitCode) {
   const errors = events.filter(e => e.type === 'error').map(e => e.message).filter(Boolean);
   const warnings = events.filter(e => e.type === 'warning').map(e => e.message).filter(Boolean);
 
-  let verdict;
-  if (exitCode === 0 && end?.status === 'passed') verdict = 'passed';
-  else if (exitCode === 2) verdict = 'error';
-  else if (exitCode === 3) verdict = 'timeout';
-  else if (end) verdict = 'failed';
-  else verdict = 'error';
+  const verdict = classify(exitCode, end);
 
   return {
     verdict,
     exitCode,
     kaneVersion: start.cli_version,
     reason: end?.reason || errors.at(-1) || (exitCode === 2 ? 'Kane CLI refused to start the run' : undefined),
+    reasonCode: end?.reason_code,
     summary: end?.summary,
     oneLiner: end?.one_liner,
     steps: steps.filter(s => s.status === 'done' || s.status === 'failed').length,
@@ -70,6 +66,23 @@ export function summarize(events, exitCode) {
     bug: end?.verdict,
     finalState: end?.final_state,
   };
+}
+
+// Verdicts kane-loop acts on. Result-code ranges: https://www.testmuai.com/docs/kane-cli-error-codes
+//   passed  : exit 0 + run_end passed
+//   failed  : 3xx stuck, 650 error page, 7xx assertion  -> the app's problem, goes to the agent
+//   timeout : exit 3 or 530                              -> goes to the agent
+//   flaky   : 2xx cancelled, 4xx Kane agent error, 510/520/540 infra -> re-run, never sent to the agent
+//   blocked : 6xx except 650 (captcha, paywall, WAF, missing credentials) -> needs a human
+//   error   : exit 2, 550 auth, 560 credits              -> setup problem, stop the loop
+export function classify(exitCode, end) {
+  const rc = Number(end?.result_code);
+  if (exitCode === 0 && end?.status === 'passed') return 'passed';
+  if (exitCode === 2 || rc === 550 || rc === 560) return 'error';
+  if ((rc >= 200 && rc < 300) || (rc >= 400 && rc < 500) || rc === 510 || rc === 520 || rc === 540) return 'flaky';
+  if (exitCode === 3 || rc === 530) return 'timeout';
+  if (rc >= 600 && rc < 700 && rc !== 650) return 'blocked';
+  return end ? 'failed' : 'error';
 }
 
 export function runKane(flow, opts = {}) {

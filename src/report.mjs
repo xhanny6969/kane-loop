@@ -6,14 +6,18 @@ export const color = {
   green: s => c(32, s), red: s => c(31, s), yellow: s => c(33, s), dim: s => c(2, s), bold: s => c(1, s), cyan: s => c(36, s),
 };
 
-const ICON = { passed: '✓', failed: '✗', timeout: '⏱', error: '!' };
-const PAINT = { passed: color.green, failed: color.red, timeout: color.yellow, error: color.yellow };
+const ICON = { passed: '✓', failed: '✗', timeout: '⏱', flaky: '↻', blocked: '⊘', error: '!' };
+const PAINT = { passed: color.green, failed: color.red, timeout: color.yellow, flaky: color.yellow, blocked: color.yellow, error: color.yellow };
+export const AGENT_FIXABLE = new Set(['failed', 'timeout']);
+let nameWidth = 22;
+export function setNameWidth(names) { nameWidth = Math.max(12, ...names.map(n => n.length)) + 1; }
 
 export function line(r) {
   const paint = PAINT[r.verdict] || (s => s);
   const credits = r.credits != null ? `${Math.round(r.credits * 10) / 10} cr` : '';
   const why = r.verdict === 'passed' ? (r.oneLiner || r.reason || '') : (r.bug?.bug_title ? `bug: ${r.bug.bug_title}` : (r.failedSteps.at(-1) || r.reason || ''));
-  return `  ${paint(`${ICON[r.verdict] || '?'} ${r.verdict.toUpperCase().padEnd(7)}`)} ${color.bold(r.flow.padEnd(22))} ${color.dim(`${r.wallSec ?? '-'}s ${credits}`.padEnd(14))} ${clip(why, 90)}`;
+  const tag = r.retried ? color.dim(` (retry ${r.retried})`) : '';
+  return `  ${paint(`${ICON[r.verdict] || '?'} ${r.verdict.toUpperCase().padEnd(7)}`)} ${color.bold(r.flow.padEnd(nameWidth))} ${color.dim(`${r.wallSec ?? '-'}s ${credits}`.padEnd(14))} ${clip(why, 80)}${tag}`;
 }
 
 export function tally(results) {
@@ -27,13 +31,14 @@ export function clip(s = '', n = 100) {
 }
 
 export function fixRequest({ results, flowsFile, url, serve, iteration, maxIter, history, violation, protectedFiles }) {
-  const failing = results.filter(r => r.verdict !== 'passed');
+  const failing = results.filter(r => AGENT_FIXABLE.has(r.verdict));
   const passing = results.filter(r => r.verdict === 'passed');
+  const skipped = results.filter(r => !AGENT_FIXABLE.has(r.verdict) && r.verdict !== 'passed');
   const out = [];
-  out.push(`# Kane CLI rejected the app — iteration ${iteration} of ${maxIter}`);
+  out.push(`# Kane CLI rejected the app — agent pass ${iteration} of ${maxIter}`);
   out.push('');
   out.push('You are the coding agent in a kane-loop. Kane CLI just drove the app in a real Chrome browser,');
-  out.push(`following the plain-English flows in \`${flowsFile}\`. ${failing.length} of ${results.length} flows did not pass.`);
+  out.push(`following the plain-English flows in \`${flowsFile}\`. ${failing.length} of ${results.length} flows failed because of the app.`);
   out.push('');
   out.push('## Rules');
   out.push(`- The flows are the spec. Do NOT edit ${protectedFiles.map(f => `\`${f}\``).join(', ')} or anything in \`.kane-loop/\`. Edits there are reverted automatically and reported.`);
@@ -68,6 +73,11 @@ export function fixRequest({ results, flowsFile, url, serve, iteration, maxIter,
     out.push('');
     out.push('## Passing flows (keep them green)');
     for (const r of passing) out.push(`- ${r.title}: ${r.objective}`);
+  }
+  if (skipped.length) {
+    out.push('');
+    out.push('## Not your problem (Kane infrastructure, re-checked next pass)');
+    for (const r of skipped) out.push(`- ${r.title}: ${r.reasonCode || r.verdict} — ${clip(r.reason, 160)}`);
   }
   if (history.length) {
     out.push('');

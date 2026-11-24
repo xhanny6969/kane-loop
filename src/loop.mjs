@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join, relative, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { loadFlows } from './flows.mjs';
-import { runAll } from './kane.mjs';
+import { runAll, runKane } from './kane.mjs';
 import { runAgent } from './agents.mjs';
 import { startServer } from './serve.mjs';
-import { color, fixRequest, line, markdownReport, tally } from './report.mjs';
+import { AGENT_FIXABLE, color, fixRequest, line, markdownReport, setNameWidth, tally } from './report.mjs';
 
 const say = (...a) => console.log(...a);
 
@@ -42,11 +42,25 @@ async function verifyOnce(cfg, doc, runDir, label) {
   const flows = cfg.only?.length ? doc.flows.filter(f => cfg.only.includes(f.name)) : doc.flows;
   if (!flows.length) throw new Error(`--only matched no flows (have: ${doc.flows.map(f => f.name).join(', ')})`);
   say(`\n${color.cyan('▶ Kane CLI')} ${label} ${color.dim(`· ${flows.length} flow(s) · ${cfg.url || flows[0].url || 'default url'}`)}`);
-  return runAll(flows, {
+  setNameWidth(flows.map(f => f.name));
+  const opts = {
     url: cfg.url, headed: cfg.headed, maxSteps: cfg.maxSteps, timeout: cfg.timeout, parallel: cfg.parallel,
     bugDetection: cfg.bugDetection, cwd: cfg.cwd, logDir: runDir, extraArgs: cfg.kaneArgs,
-    onDone: r => say(line(r)),
-  });
+  };
+  const results = await runAll(flows, { ...opts, onDone: r => say(line(r)) });
+  // Kane infrastructure hiccups (screenshot failed, browser crashed, Kane agent error) are not
+  // the app's fault: re-run them on their own instead of sending them to the coding agent.
+  const retries = cfg.retries ?? 2;
+  for (let i = 0; i < results.length; i++) {
+    for (let n = 1; results[i].verdict === 'flaky' && n <= retries; n++) {
+      say(color.dim(`  ↻ ${results[i].flow}: ${results[i].reasonCode || 'Kane infra error'} — re-running on its own (${n}/${retries})`));
+      const again = await runKane(flows[i], { ...opts, logDir: join(runDir, `retry-${n}`) });
+      again.retried = n;
+      results[i] = again;
+      say(line(again));
+    }
+  }
+  return results;
 }
 
 function writeOutputs(cfg, doc, results, extra = {}) {
@@ -66,11 +80,18 @@ function writeOutputs(cfg, doc, results, extra = {}) {
   return stamp;
 }
 
+const STOP = new Set(['error', 'blocked']);
+function mustStop(results) {
+  if (results.some(r => STOP.has(r.verdict))) return true;
+  // only infrastructure noise left after retries: nothing the agent could fix
+  return !results.some(r => AGENT_FIXABLE.has(r.verdict)) && results.some(r => r.verdict === 'flaky');
+}
+
 function explainError(results) {
-  const bad = results.filter(r => r.verdict === 'error');
-  say(color.yellow(`\n! Kane CLI could not start ${bad.length} run(s). That is a setup problem, not an app bug, so the agent is not called.`));
+  const bad = results.filter(r => r.verdict !== 'passed' && !AGENT_FIXABLE.has(r.verdict));
+  say(color.yellow(`\n! ${bad.length} run(s) failed for reasons outside the app (setup, credentials, Kane infrastructure or a site blocker), so the agent is not called.`));
   for (const r of bad) {
-    say(`  ${r.flow}: ${r.reason || 'exit code 2'}`);
+    say(`  ${r.flow} [${r.verdict}${r.reasonCode ? ` ${r.reasonCode}` : ''}]: ${r.reason || 'exit code 2'}`);
     if (r.stderrTail) say(color.dim(r.stderrTail.split('\n').map(l => `    ${l}`).join('\n')));
   }
   say(color.dim('  Check: kane-cli whoami  ·  the --url is reachable  ·  Chrome is installed'));
@@ -82,7 +103,7 @@ export async function verify(cfg) {
   const results = await withServer(cfg, () => verifyOnce(cfg, doc, runDir, 'verify'));
   const out = writeOutputs(cfg, doc, results);
   const { passed, total, green } = tally(results);
-  if (results.some(r => r.verdict === 'error')) { explainError(results); return 2; }
+  if (mustStop(results)) { explainError(results); return 2; }
   say(`\n${green ? color.green(`✓ VERIFIED ${passed}/${total}`) : color.red(`✗ NOT VERIFIED ${passed}/${total}`)} ${color.dim(`→ .kane-loop/report.md`)}`);
   return green ? 0 : 1;
 }
@@ -106,7 +127,7 @@ export async function fix(cfg) {
       history.push({ iteration, passed, total, specViolation: !!violation, at: new Date().toISOString() });
       writeFileSync(join(dir, 'history.json'), JSON.stringify({ session, agent: cfg.agent, history }, null, 2) + '\n');
 
-      if (results.some(r => r.verdict === 'error')) { explainError(results); writeOutputs(cfg, doc, results, { iterations: iteration }); return 2; }
+      if (mustStop(results)) { explainError(results); writeOutputs(cfg, doc, results, { iterations: iteration }); return 2; }
       if (green) {
         writeOutputs(cfg, doc, results, { iterations: iteration });
         if (cfg.commit && iteration > 0) gitCommit(cfg.cwd, `kane-loop: verified ${passed}/${total} flows after ${iteration} agent pass(es)`);
@@ -124,7 +145,8 @@ export async function fix(cfg) {
       writeFileSync(promptFile, prompt);
       const before = new Map(protectedFiles.map(f => [f, read(resolve(cfg.cwd, f))]));
 
-      say(`\n${color.cyan('▶ agent')} ${cfg.agent} ${color.dim(`· pass ${iteration + 1}/${maxIter} · ${total - passed} failing flow(s) handed over in .kane-loop/FIX_REQUEST.md`)}`);
+      const fixable = results.filter(r => AGENT_FIXABLE.has(r.verdict)).length;
+      say(`\n${color.cyan('▶ agent')} ${cfg.agent} ${color.dim(`· pass ${iteration + 1}/${maxIter} · ${fixable} failing flow(s) handed over in .kane-loop/FIX_REQUEST.md`)}`);
       const res = await runAgent(cfg.agent, {
         cwd: cfg.cwd, promptFile: relative(cfg.cwd, promptFile), logFile: join(dir, `agent-${session}-${iteration + 1}.log`),
         timeoutSec: cfg.agentTimeout, onOutput: cfg.quietAgent ? null : s => {

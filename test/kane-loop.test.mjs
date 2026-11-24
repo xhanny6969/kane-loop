@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFlows } from '../src/flows.mjs';
-import { parseNdjson, summarize } from '../src/kane.mjs';
+import { classify, parseNdjson, summarize } from '../src/kane.mjs';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const BIN = join(here, '..', 'bin', 'kane-loop.mjs');
@@ -116,7 +116,7 @@ test('fix: a Kane setup error (exit 2) never reaches the agent', () => {
   const dir = project(TWO_FLOWS);
   const r = cli(dir, ['fix'], { FAKE_KANE_EXIT: '2' });
   assert.equal(r.code, 2, r.out);
-  assert.match(r.out, /setup problem, not an app bug/);
+  assert.match(r.out, /reasons outside the app/);
   assert.match(r.out, /Not logged in/);
   assert.equal(existsSync(join(dir, '.kane-loop', 'FIX_REQUEST.md')), false);
 });
@@ -133,4 +133,35 @@ test('gate: runs the deploy command only when every flow passes', () => {
   const open = cli(dir, ['gate', '--', deploy]);
   assert.equal(open.code, 0, open.out);
   assert.equal(existsSync(join(dir, 'deployed')), true);
+});
+
+test('classify: result-code ranges decide who has to act', () => {
+  const end = rc => ({ type: 'run_end', status: 'failed', result_code: rc });
+  assert.equal(classify(0, { type: 'run_end', status: 'passed', result_code: 100 }), 'passed');
+  assert.equal(classify(1, end(720)), 'failed');
+  assert.equal(classify(1, end(310)), 'failed', 'stuck usually means the UI the flow needs is missing');
+  assert.equal(classify(1, end(650)), 'failed', 'an HTTP error page is the app');
+  assert.equal(classify(1, end(510)), 'flaky');
+  assert.equal(classify(1, end(420)), 'flaky');
+  assert.equal(classify(3, end(530)), 'timeout');
+  assert.equal(classify(1, end(610)), 'blocked');
+  assert.equal(classify(1, end(560)), 'error');
+  assert.equal(classify(2, undefined), 'error');
+});
+
+test('verify: a Kane infra error is re-run on its own, not reported as an app failure', () => {
+  const dir = project(TWO_FLOWS, '<h1>Hello</h1><p>Each pays 30.00</p>');
+  const r = cli(dir, ['verify'], { FAKE_KANE_FLAKY_ONCE: '1' });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /FLAKY\s+greeting/);
+  assert.match(r.out, /infra_error.screenshot_failed — re-running on its own \(1\/2\)/);
+  assert.match(r.out, /PASSED\s+greeting.*\(retry 1\)/);
+});
+
+test('fix: a site blocker (captcha) stops the loop without calling the agent', () => {
+  const dir = project(TWO_FLOWS);
+  const r = cli(dir, ['fix'], { FAKE_KANE_BLOCKED: '1' });
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /blocked blocker.captcha/);
+  assert.equal(existsSync(join(dir, '.kane-loop', 'FIX_REQUEST.md')), false);
 });

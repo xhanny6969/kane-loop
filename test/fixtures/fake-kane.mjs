@@ -11,6 +11,21 @@ if (process.env.FAKE_KANE_EXIT === '2') {
 }
 
 const objective = argv[1] || '';
+import { existsSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const marker = `.flaky-${createHash('md5').update(objective).digest('hex').slice(0, 8)}`;
+if (process.env.FAKE_KANE_FLAKY_ONCE === '1' && !existsSync(marker)) {
+  writeFileSync(marker, '1');
+  emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
+  emit({ step: 2, status: 'failed', remark: 'agent_info: Screenshot failed: TargetClosedError' });
+  emit({ type: 'run_end', status: 'failed', reason: 'Screenshot failed: TargetClosedError', result_code: 510, reason_code: 'infra_error.screenshot_failed', verdict: { confirmed: false, family: 'environment_issue', bug_title: 'Browser session closed before screenshot capture' } });
+  process.exit(1);
+}
+if (process.env.FAKE_KANE_BLOCKED === '1') {
+  emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
+  emit({ type: 'run_end', status: 'failed', reason: 'CAPTCHA challenge', result_code: 610, reason_code: 'blocker.captcha' });
+  process.exit(1);
+}
 const url = argv[argv.indexOf('--url') + 1];
 emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
 process.stdout.write('not json, should be ignored\n');

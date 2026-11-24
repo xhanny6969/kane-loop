@@ -31,15 +31,16 @@ Options
   --timeout <s>         per-run timeout passed to Kane
   --bug-detection <m>   off | stop | continue (passed to Kane)
   --max-iter <n>        agent passes before giving up (default 5)
+  --retries <n>         re-runs for Kane infrastructure errors, never sent to the agent (default 2)
   --commit              git commit after every agent pass and on green
   --agent-timeout <s>   kill the agent after this long (default 900)
   --quiet-agent         do not stream agent output
   --config <file>       config file (default kane-loop.json)
 
-Exit codes: 0 verified · 1 flows still failing · 2 Kane could not start (auth, url, Chrome)`;
+Exit codes: 0 verified · 1 flows still failing · 2 stopped for a non-app reason (auth, credits, url, Chrome, captcha, Kane infra)`;
 
 const FLAGS = new Set(['headed', 'commit', 'quiet-agent', 'help', 'version']);
-const NUMS = new Set(['parallel', 'max-steps', 'timeout', 'max-iter', 'agent-timeout', 'port', 'serve-timeout']);
+const NUMS = new Set(['parallel', 'max-steps', 'timeout', 'max-iter', 'agent-timeout', 'port', 'serve-timeout', 'retries']);
 const camel = s => s.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
 
 function parse(argv) {
