@@ -79,7 +79,7 @@ test('verify: exits 1 and writes a report when a flow fails', () => {
   const r = cli(dir, ['verify']);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /PASSED\s+greeting/);
-  assert.match(r.out, /FAILED\s+total/);
+  assert.match(r.out, /FAILED\s+total.*bug: Missing text/);
   assert.match(readFileSync(join(dir, '.kane-loop', 'report.md'), 'utf8'), /NOT VERIFIED \(1\/2\)/);
   assert.equal(existsSync(join(dir, '.kane-loop', 'verified.json')), false);
 });
@@ -95,6 +95,8 @@ test('fix: hands failures to the agent and stops once Kane passes everything', (
   const req = readFileSync(join(dir, '.kane-loop', 'FIX_REQUEST.md'), 'utf8');
   assert.match(req, /Failed step: assert: expected the page to show "Each pays 30.00"/);
   assert.match(req, /Passing flows \(keep them green\)/);
+  assert.match(req, /Kane bug report: \*\*Missing text: Each pays 30.00\*\* \(major, confidence 0.9\)/);
+  assert.match(req, /Suggested fix \(Kane\): Render/);
   assert.match(readFileSync(join(dir, 'app', 'index.html'), 'utf8'), /Each pays 30.00/);
 });
 

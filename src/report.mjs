@@ -1,6 +1,6 @@
 // Terminal table + markdown report + the prompt the agent reads.
 
-const tty = process.stdout.isTTY && !process.env.NO_COLOR;
+const tty = (process.stdout.isTTY || !!process.env.FORCE_COLOR) && !process.env.NO_COLOR;
 const c = (code, s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
 export const color = {
   green: s => c(32, s), red: s => c(31, s), yellow: s => c(33, s), dim: s => c(2, s), bold: s => c(1, s), cyan: s => c(36, s),
@@ -12,7 +12,7 @@ const PAINT = { passed: color.green, failed: color.red, timeout: color.yellow, e
 export function line(r) {
   const paint = PAINT[r.verdict] || (s => s);
   const credits = r.credits != null ? `${Math.round(r.credits * 10) / 10} cr` : '';
-  const why = r.verdict === 'passed' ? (r.oneLiner || r.reason || '') : (r.failedSteps.at(-1) || r.reason || '');
+  const why = r.verdict === 'passed' ? (r.oneLiner || r.reason || '') : (r.bug?.bug_title ? `bug: ${r.bug.bug_title}` : (r.failedSteps.at(-1) || r.reason || ''));
   return `  ${paint(`${ICON[r.verdict] || '?'} ${r.verdict.toUpperCase().padEnd(7)}`)} ${color.bold(r.flow.padEnd(22))} ${color.dim(`${r.wallSec ?? '-'}s ${credits}`.padEnd(14))} ${clip(why, 90)}`;
 }
 
@@ -53,8 +53,14 @@ export function fixRequest({ results, flowsFile, url, serve, iteration, maxIter,
     out.push(`- Objective: ${r.objective}`);
     out.push(`- Kane verdict: **${r.verdict}**${r.reason ? ` — ${r.reason}` : ''}`);
     for (const s of r.failedSteps) out.push(`- Failed step: ${s}`);
-    if (r.summary) out.push(`- What Kane saw: ${r.summary}`);
-    if (r.bug) out.push(`- Bug verdict: ${JSON.stringify(r.bug)}`);
+    if (r.summary) out.push(`- What Kane saw: ${r.summary.replace(/\s*\n\s*/g, ' ')}`);
+    if (r.bug) {
+      const b = r.bug;
+      if (b.bug_title) out.push(`- Kane bug report: **${b.bug_title}**${b.severity ? ` (${b.severity}` : ''}${b.confidence != null ? `, confidence ${b.confidence})` : b.severity ? ')' : ''}`);
+      if (b.family && b.family !== 'application_issue') out.push(`- Kane classifies this as \`${b.family}\`, not an application bug. Check whether the app really is at fault before changing it.`);
+      if (b.root_cause) out.push(`- Root cause (Kane): ${b.root_cause}`);
+      if (b.suggestion) out.push(`- Suggested fix (Kane): ${b.suggestion}`);
+    }
     for (const e of r.errors) out.push(`- Error: ${e}`);
     if (r.sessionDir) out.push(`- Evidence (screenshots, logs): ${r.sessionDir}`);
   }

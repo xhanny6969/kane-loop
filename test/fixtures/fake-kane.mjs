@@ -24,7 +24,8 @@ const missing = wanted.filter(w => !body.includes(w));
 
 if (missing.length) {
   emit({ step: 2, status: 'failed', remark: `assert: expected the page to show "${missing[0]}" but it was not found` });
-  emit({ type: 'run_end', status: 'failed', summary: `Opened ${url}; ${missing.length} expectation(s) missing`, reason: 'Assertion failed', duration: 1.2, credits_consumed: 3.5, session_dir: '/tmp/fake-session' });
+  emit({ type: 'run_end', status: 'failed', summary: `Opened ${url}; ${missing.length} expectation(s) missing`, reason: 'Assertion failed', duration: 1.2, credits_consumed: 3.5, session_dir: '/tmp/fake-session', result_code: 740,
+    verdict: { confirmed: true, family: 'application_issue', severity: 'major', bug_title: `Missing text: ${missing[0]}`, root_cause: 'The page does not render the expected text', suggestion: `Render "${missing[0]}"`, confidence: 0.9 } });
   process.exit(1);
 }
 emit({ step: 2, status: 'done', remark: `assert: page shows ${wanted.join(', ')}` });
