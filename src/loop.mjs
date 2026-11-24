@@ -17,15 +17,28 @@ export function stateDir(cfg) {
   return dir;
 }
 
+// KANE_LOOP_GIT points at a git binary when the one on PATH cannot be spawned by Node
+// (for example a git.exe inside a sandboxed Windows app package, which fails with EPERM).
+let gitWarned = false;
+function git(cwd, args) {
+  const r = spawnSync(process.env.KANE_LOOP_GIT || 'git', args, { cwd, encoding: 'utf8', windowsHide: true });
+  if (r.error && !gitWarned) {
+    gitWarned = true;
+    say(color.yellow(`  ! git could not be started (${r.error.code || r.error.message}); git steps skipped. Set KANE_LOOP_GIT to a git binary.`));
+  }
+  return r;
+}
+
 function gitHead(cwd) {
-  const r = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd, encoding: 'utf8' });
+  const r = git(cwd, ['rev-parse', '--short', 'HEAD']);
   return r.status === 0 ? r.stdout.trim() : undefined;
 }
 
 function gitCommit(cwd, message) {
-  if (spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd }).status !== 0) return false;
-  spawnSync('git', ['add', '-A', '--', '.'], { cwd }); // only the project under test, not the whole repo
-  const r = spawnSync('git', ['commit', '-q', '-m', message], { cwd, encoding: 'utf8' });
+  if (git(cwd, ['rev-parse', '--is-inside-work-tree']).status !== 0) return false;
+  git(cwd, ['add', '-A', '--', '.']); // only the project under test, not the whole repo
+  const r = git(cwd, ['commit', '-q', '-m', message]);
+  if (r.status === 0) say(color.dim(`  git: ${message}`));
   return r.status === 0;
 }
 
