@@ -1,0 +1,32 @@
+{
+  "name": "kane-loop",
+  "version": "0.1.0",
+  "description": "Close the loop between your AI coding agent and Kane CLI: plain-English flows in, a verified app out.",
+  "type": "module",
+  "bin": {
+    "kane-loop": "bin/kane-loop.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "kane-cli",
+    "testmu",
+    "e2e",
+    "ai-agent",
+    "claude-code",
+    "codex",
+    "hermes",
+    "verification"
+  ],
+  "license": "MIT"
+}
