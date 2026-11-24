@@ -17,7 +17,7 @@ flows.md ──▶ Kane CLI (real Chrome) ──▶ ✗ failures ──▶ FIX_R
 npm install -g @testmuai/kane-cli      # Kane CLI
 kane-cli login                         # TestMu AI account (free credits)
 git clone https://github.com/xhanny6969/kane-loop && cd kane-loop
-npm test                               # 13 tests, no credits needed (Kane + agent test doubles)
+npm test                               # 17 tests, no credits needed (Kane + agent test doubles)
 ```
 
 Point it at your own project:
@@ -29,6 +29,7 @@ node /path/to/kane-loop/bin/kane-loop.mjs init      # writes flows.md + kane-loo
 kane-loop verify                                    # Kane runs every flow, exit 0 only if all pass
 kane-loop fix --agent claude                        # loop until green (hermes | claude | codex | gemini | kiro)
 kane-loop gate -- npx wrangler pages deploy dist    # deploy only if every flow passes
+kane-loop calibrate --runs 3                        # is each flow's verdict stable enough to trust?
 ```
 
 Node 20+, zero dependencies.
@@ -56,9 +57,10 @@ then verify the page shows a total of 110.00 and that each person pays 27.50
 | `kane-loop verify` | Runs every flow through `kane-cli run --agent`, prints a verdict table, writes `.kane-loop/report.md` + `last-run.json` | 0 all pass · 1 something failed · 2 Kane could not start |
 | `kane-loop fix --agent <a>` | Baseline verify, then for up to `--max-iter` passes: write `FIX_REQUEST.md`, run the agent, revert any spec edits, re-verify **all** flows (regressions count) | same |
 | `kane-loop gate -- <cmd>` | Verify, then run `<cmd>` only on all-green | the command's exit code, or 1/2 |
+| `kane-loop calibrate --runs 3` | Runs every flow N times on identical code (the app files are hashed and must not change) and classifies each flow as stable-pass, stable-fail, unstable or noisy. Writes `.kane-loop/calibration.md` + `.json` | 0 every flow stable · 1 stable failures · 2 unstable or noisy |
 | `kane-loop static <dir>` | No-cache static server, so Kane never tests a stale copy of a page the agent just rewrote | — |
 
-Useful options: `--serve "<cmd>"` starts the app and waits for `--url` to answer, then stops it afterwards · `--parallel 3` · `--headed` to watch the browser · `--only a,b` · `--bug-detection continue` · `--commit` adds a git commit per agent pass, so the history shows the loop. Everything can also go in `kane-loop.json`.
+Useful options: `--serve "<cmd>"` starts the app and waits for `--url` to answer, then stops it afterwards · `--parallel 3` (launches are staggered, see below) · `--stall-timeout 600` / `--error-grace 90` kill a Kane run that hangs · `--headed` to watch the browser · `--only a,b` · `--bug-detection continue` · `--commit` adds a git commit per agent pass, so the history shows the loop. Everything can also go in `kane-loop.json`.
 
 ## How the loop decides
 
@@ -77,6 +79,8 @@ Guards that keep the agent honest, and keep it from being sent on wild-goose cha
 - **The spec is read-only.** `flows.md` and `kane-loop.json` are hashed before every agent pass and restored if they change; the next prompt says the edit was reverted.
 - **No regressions.** Every pass re-runs every flow, so fixing flow B by breaking flow A doesn't count.
 - **Evidence beats a single verdict.** kane-loop hashes the app files. If a flow already passed on this exact code and now "fails", it is re-checked instead of handed to the agent. A flow whose verdict keeps flipping on identical code is reported as `kane_loop.nondeterministic` for a human.
+- **Parallel runs never share a browser.** With `--parallel`, the next Kane run starts only after the previous run's browser is up (first step event, at most `--launch-gap` 45 s). See *Kane CLI and parallel runs* below.
+- **A hung Kane run is killed, not waited on.** A run that reports an internal error but never sends `run_end` (90 s), or prints nothing at all (600 s), is killed with its Chrome and re-run as a Kane problem, never sent to the agent.
 - **A stamp you can check.** `verified.json` records the spec hash, the git commit of the verified code, the Kane CLI version and each run's public Test Manager link. It is only written on all-green.
 
 ## Agents
@@ -120,11 +124,54 @@ Wall clock 10 min 51 s, about 72 Kane credits. Every verdict is public:
 
 ### What the first real run taught us
 
-The first attempt used a naive loop that sent every Kane failure to the agent. After agent pass 1 the app was correct: 3/4 green, every flow passed at least once in the following re-runs, and Hermes reported making no edits after pass 1. Yet across those three re-runs Kane reported **7 failures**: browser sessions closed before a screenshot (`510`, 3×), final assertions that misread correct values (`710`, 3×), and one "confirmed" bug about inputs resetting that the final code has no logic for. Hermes, reading Kane's own triage in the fix request, correctly refused to edit the app three times in a row, but the loop could never go green. That run is why kane-loop now re-runs infra failures, trusts Kane's *unconfirmed* triage, and re-checks any failure on code that already passed that flow.
+The first attempt used a naive loop that sent every Kane failure to the agent, with `--parallel 2`. After agent pass 1 the app was correct: every flow passed at least once in the following re-runs, and Hermes made no edits after pass 1. Yet across three re-runs Kane reported **7 failures**: browser sessions closed before a screenshot (`510`, 3×), final assertions that misread correct values (`710`, 3×), and one *confirmed* bug, "Bill splitter resets other inputs after field updates", that the code has no logic for. Hermes, reading Kane's own triage in the fix request, refused to edit the app three times in a row, but the loop could never go green. That run is why kane-loop re-runs infra failures, trusts Kane's *unconfirmed* triage, and re-checks any failure on code that already passed that flow.
+
+Those failures had a cause, and it was not the app.
+
+## Kane CLI and parallel runs
+
+Two `kane-cli run` processes that start at the same moment can end up driving **the same Chrome** (Kane CLI 0.10.8, Windows 11).
+
+- Kane picks its CDP port by probing `127.0.0.1:9222`–`9230` and taking the first port that refuses a connection, then talks to `http://127.0.0.1:<port>`.
+- When `127.0.0.1:<port>` is already taken, Chrome on Windows listens on `[::1]:<port>` instead, so a second probe still sees the port as free.
+- Two runs that start together therefore pick the same port. One Chrome holds `127.0.0.1`, the other `[::1]`, and **both** Kane processes connect to the first one. They type over each other's inputs. When one finishes it closes the page, and the other gets `TargetClosedError`.
+
+`scripts/cdp-port-race.mjs` reproduces this with plain headless Chrome. It uses no Kane runs and no credits:
+
+```
+$ node scripts/cdp-port-race.mjs together
+  run A: picked port 9231; http://127.0.0.1:9231 is answered by "run A"
+  run B: picked port 9231; http://127.0.0.1:9231 is answered by "run A"
+  listening on 9231: TCP 127.0.0.1:9231  |  TCP [::1]:9231
+  -> both runs drive ONE browser
+$ node scripts/cdp-port-race.mjs staggered
+  run A: picked port 9231; http://127.0.0.1:9231 is answered by "run A"
+  run B: picked port 9232; http://127.0.0.1:9232 is answered by "run B"
+  -> each run drives its own browser
+```
+
+Kane's own session logs (`~/.testmuai/kaneai/sessions/*/tui.log`) show the same thing in real runs. Two runs that started in the same second kept re-typing the bill amount: 11 s after one typed 100, the other (which had to enter 90) logged "Pressing down to decrease the bill amount". Every `TargetClosedError` landed 0–11 s after the other run finished. Once, Kane then emitted `{"type":"error"}` and never exited: no `run_end` for 1 h 47 min, until it was killed.
+
+All Kane runs on the correct splitbill code on 24 Nov, from Kane's session logs:
+
+| How the run started | Runs | Passed | Failed | Hung |
+|---|---|---|---|---|
+| within 3 s of another Kane run (no launch gap) | 12 | 3 | 8 (`710` ×4, `510` ×3, `740` ×1) | 1 |
+| alone, or after the other run's browser was up | 36 | **36** | 0 | 0 |
+
+Same app, same four flows, 3 runs each (`kane-loop calibrate --runs 3`):
+
+| Setting | Result | Wall clock | Credits |
+|---|---|---|---|
+| `--parallel 1` | 12/12 stable-pass | 18 min 53 s | 174.8 |
+| `--parallel 2`, launches together (before the fix) | round 1: one false `710`, one run hung for 1 h 47 min | — | — |
+| `--parallel 2`, staggered launch (kane-loop now) | **12/12 stable-pass** | **8 min 53 s** | 167.1 |
+
+kane-loop now staggers launches by default and kills hung runs. If you call Kane yourself from scripts or CI, start parallel runs a few seconds apart or give each one its own `--cdp-endpoint`.
 
 ## Tests
 
-`npm test` runs the whole loop end to end against test doubles in `test/fixtures/`: a fake `kane-cli` that emits the real NDJSON shape, exit codes and result codes (including scripted pass/fail sequences), and a fake agent (one variant cheats by rewriting the spec). 13 tests cover flow parsing, result-code classification, the fix loop reaching green, spec-edit revert, infra errors re-run instead of reported, captcha/auth stopping the loop without calling the agent, re-checking a failure on code that already passed, flipping verdicts going to a human, and the deploy gate staying closed on red.
+`npm test` runs the whole loop end to end against test doubles in `test/fixtures/`: a fake `kane-cli` that emits the real NDJSON shape, exit codes and result codes (including scripted pass/fail sequences), and a fake agent (one variant cheats by rewriting the spec). 17 tests cover flow parsing, result-code classification, the fix loop reaching green, spec-edit revert, infra errors re-run instead of reported, captcha/auth stopping the loop without calling the agent, re-checking a failure on code that already passed, flipping verdicts going to a human, calibrate's stability classes, a Kane run that hangs after an internal error being killed and re-run, parallel launches never overlapping, and the deploy gate staying closed on red.
 
 ## License
 

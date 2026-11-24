@@ -1,0 +1,154 @@
+{
+  "calibratedAt": "2026-11-24T06:25:09.849Z",
+  "appFingerprint": "ca8d8f0caa09",
+  "flowsSha256": "04ec2e3eb2ba4c8adebfb4635e34173afb4ce82666bc2a29de7afbe0d9dcac26",
+  "runsPerFlow": 3,
+  "parallel": 1,
+  "kaneCliVersion": "0.10.8",
+  "agreement": "12/12",
+  "nonAppFailures": 0,
+  "falseConfirmed": 0,
+  "credits": 174.8,
+  "flows": [
+    {
+      "flow": "even-split",
+      "title": "even split",
+      "cls": "stable-pass",
+      "passes": 3,
+      "n": 3,
+      "agreement": 1,
+      "marks": "✓✓✓",
+      "noise": [],
+      "avgDuration": 47.4,
+      "avgCredits": 15.5,
+      "runs": [
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 19.609737499999998,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M862KVPKT78K4YWAXM7TCQWW/dashboard/share/US_J098T7NA9VAMCM48NEMCAMJJX7B138VCK19Z3DJE7FCFYCO1MGHVNYXQJSJVD8BP?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 15.1109435,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M862ZKPPFJE3ERZVHZBK6SSC/dashboard/share/US_OP24LRU31KNGZLHB39JRMZPY633C0SVHNA75DRLX9FWUZ7Z33K9PIRO01LV9Z85I?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 11.691368500000001,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M863C4GWZJFCM0GVNGYAHJ28/dashboard/share/US_PFOMXFXUXQKQFGY1ZNUT6F2OQFEL6F7UPZGX5UDZZB9M0HCTZLQQ3IJ02CBQO0EN?type=summary&agentView=true&fqdn=summary-page"
+        }
+      ]
+    },
+    {
+      "flow": "tip-is-added-before-splitting",
+      "title": "tip is added before splitting",
+      "cls": "stable-pass",
+      "passes": 3,
+      "n": 3,
+      "agreement": 1,
+      "marks": "✓✓✓",
+      "noise": [],
+      "avgDuration": 50.4,
+      "avgCredits": 14.3,
+      "runs": [
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 20.1710225,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M862QNP1VKCC9F1VQDEPV0T9/dashboard/share/US_HCFC8ABELODHBLD3FQN94HOGOQ4O4RZLSQQXPZD4KO2PT78XVHO0J53278HRMGF8?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 6.2051099999999995,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M8632CERVSW53B78GYP858FZ/dashboard/share/US_VENT347WYB0ID5CAV18L4KASRTGUN7IAM6GT1F79W07CHG3WBTSG1BLEG1VQRSOC?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 16.5563865,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M863EF2F9DDTWBN6SY38AFK9/dashboard/share/US_GX4426XWYU3HVFXRGN8CX6OSJN6VBWCAB4Q9O451ORK9DV6MGB3P02SBKSRDKQ4U?type=summary&agentView=true&fqdn=summary-page"
+        }
+      ]
+    },
+    {
+      "flow": "cents-add-up-exactly",
+      "title": "cents add up exactly",
+      "cls": "stable-pass",
+      "passes": 3,
+      "n": 3,
+      "agreement": 1,
+      "marks": "✓✓✓",
+      "noise": [],
+      "avgDuration": 51.2,
+      "avgCredits": 17.3,
+      "runs": [
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 20.460077499999997,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M862T46ASFKDH8YBBX91TXE1/dashboard/share/US_E18EJJ30I9GYIDMYCA5CIIOSVMRHYIU5L0PHPYMYAHTWWYYPCHEFUQJRCO6L60YJ?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 14.6562425,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M86353STXHK10BBED1BCVH95/dashboard/share/US_9E8DBOQZO4HC1LP9IJK6UF072WUCM64C9L31D5UUXNYJ1218KBH4C01CP87YLREF?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 16.8125985,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M863GX4A68AYP587CPZPXA30/dashboard/share/US_MY8CVE3TRG637T9R067GY35A1U1IIOGEZDC070BU9T6OTA7ECLF7YA0KM2CMYE2I?type=summary&agentView=true&fqdn=summary-page"
+        }
+      ]
+    },
+    {
+      "flow": "zero-people-is-rejected",
+      "title": "zero people is rejected",
+      "cls": "stable-pass",
+      "passes": 3,
+      "n": 3,
+      "agreement": 1,
+      "marks": "✓✓✓",
+      "noise": [],
+      "avgDuration": 56.2,
+      "avgCredits": 11.2,
+      "runs": [
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 18.762315,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M862WQN19GPFKMSG6JK4FHE6/dashboard/share/US_BPY6QPXLGSFYON3POP9WU3IDBGCGRMNTYCRYM2N0FJSMSEGB3142FR0F9RJK1R0O?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 7.891749999999999,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M86389QMN2GWZDWBSP1VF4QY/dashboard/share/US_3FOHINZZ3YP61ZJKOOP19SDN9IFOK1G1QWQRU1KKU3MYRHI2NMQE87GVJBNZQPU4?type=summary&agentView=true&fqdn=summary-page"
+        },
+        {
+          "verdict": "passed",
+          "resultCode": 100,
+          "reasonCode": "success.complete",
+          "credits": 6.837899999999999,
+          "testUrl": "https://test-manager.lambdatest.com/projects/01M85XF6009JA4MV9V1H6PG1ZH/test-cases/01M863KECWTG0EX0B15ZQQ4S1H/dashboard/share/US_P3B15CRNWATG4RVVITWCT4A1HPAY0OO2H4WN6GFB4DA9EZWYDQ194KY6P0PK0XV3?type=summary&agentView=true&fqdn=summary-page"
+        }
+      ]
+    }
+  ]
+}
