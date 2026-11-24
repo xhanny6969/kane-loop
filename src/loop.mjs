@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, relative, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { loadFlows } from './flows.mjs';
@@ -51,7 +52,26 @@ export async function withServer(cfg, fn) {
   try { return await fn(); } finally { srv.stop(); }
 }
 
-async function verifyOnce(cfg, doc, runDir, label) {
+// Content hash of the app under test. A flow that already passed on this exact code and now
+// "fails" is contradicted by evidence, so kane-loop re-checks it instead of sending the agent
+// to fix code that has not changed.
+const IGNORE = new Set(['.kane-loop', '.git', 'node_modules']);
+export function fingerprint(dir) {
+  const h = createHash('sha256');
+  const walk = d => {
+    for (const name of readdirSync(d).sort()) {
+      if (IGNORE.has(name) || name.startsWith('.flaky-') || name.startsWith('.script-')) continue;
+      const p = join(d, name);
+      const st = statSync(p);
+      if (st.isDirectory()) walk(p);
+      else { h.update(relative(dir, p)); h.update(readFileSync(p)); }
+    }
+  };
+  walk(dir);
+  return h.digest('hex').slice(0, 12);
+}
+
+async function verifyOnce(cfg, doc, runDir, label, memory = { passedOn: new Map() }) {
   const flows = cfg.only?.length ? doc.flows.filter(f => cfg.only.includes(f.name)) : doc.flows;
   if (!flows.length) throw new Error(`--only matched no flows (have: ${doc.flows.map(f => f.name).join(', ')})`);
   say(`\n${color.cyan('▶ Kane CLI')} ${label} ${color.dim(`· ${flows.length} flow(s) · ${cfg.url || flows[0].url || 'default url'}`)}`);
@@ -71,6 +91,31 @@ async function verifyOnce(cfg, doc, runDir, label) {
       again.retried = n;
       results[i] = again;
       say(line(again));
+    }
+  }
+  const fp = fingerprint(resolve(cfg.cwd, cfg.watch || '.'));
+  for (let i = 0; i < results.length; i++) {
+    const seen = memory.passedOn.get(results[i].flow);
+    if (!AGENT_FIXABLE.has(results[i].verdict) || !seen?.has(fp)) continue;
+    let confirmedFail = 0;
+    for (let n = 1; n <= retries && AGENT_FIXABLE.has(results[i].verdict); n++) {
+      say(color.dim(`  ↻ ${results[i].flow}: Kane says ${results[i].verdict}, but this exact code (${fp}) passed it before — re-checking (${n}/${retries})`));
+      const again = await runKane(flows[i], { ...opts, logDir: join(runDir, `recheck-${n}`) });
+      again.retried = n;
+      if (AGENT_FIXABLE.has(again.verdict)) confirmedFail++;
+      results[i] = again;
+      say(line(again));
+    }
+    if (AGENT_FIXABLE.has(results[i].verdict) && confirmedFail === retries) {
+      results[i] = { ...results[i], verdict: 'flaky', reasonCode: 'kane_loop.nondeterministic',
+        reason: `passed earlier on identical code (${fp}) but failed ${retries} re-check(s): Kane's verdict is not stable for this flow — a human should look at the evidence` };
+    }
+  }
+  for (const r of results) {
+    r.fingerprint = fp;
+    if (r.verdict === 'passed') {
+      if (!memory.passedOn.has(r.flow)) memory.passedOn.set(r.flow, new Set());
+      memory.passedOn.get(r.flow).add(fp);
     }
   }
   return results;
@@ -129,15 +174,17 @@ export async function fix(cfg) {
   const session = stamp();
   const maxIter = cfg.maxIter ?? 5;
   const history = [];
+  const memory = { passedOn: new Map() };
   let violation = null;
 
   return withServer(cfg, async () => {
     for (let iteration = 0; ; iteration++) {
       const doc = loadFlows(flowsPath);
       const runDir = join(dir, 'runs', session, `iter-${iteration}`);
-      const results = await verifyOnce(cfg, doc, runDir, iteration === 0 ? 'baseline' : `after agent pass ${iteration}`);
+      const results = await verifyOnce(cfg, doc, runDir, iteration === 0 ? 'baseline' : `after agent pass ${iteration}`, memory);
       const { passed, total, green } = tally(results);
-      history.push({ iteration, passed, total, specViolation: !!violation, at: new Date().toISOString() });
+      history.push({ iteration, passed, total, appFingerprint: results[0]?.fingerprint, specViolation: !!violation, at: new Date().toISOString(),
+        flows: Object.fromEntries(results.map(r => [r.flow, r.verdict + (r.retried ? ` (re-run ${r.retried})` : '')])) });
       writeFileSync(join(dir, 'history.json'), JSON.stringify({ session, agent: cfg.agent, history }, null, 2) + '\n');
 
       if (mustStop(results)) { explainError(results); writeOutputs(cfg, doc, results, { iterations: iteration }); return 2; }

@@ -168,3 +168,31 @@ test('fix: a site blocker (captcha) stops the loop without calling the agent', (
   assert.match(r.out, /blocked blocker.captcha/);
   assert.equal(existsSync(join(dir, '.kane-loop', 'FIX_REQUEST.md')), false);
 });
+
+test('fix: a "fail" on code that already passed that flow is re-checked, not sent to the agent', () => {
+  const dir = project(TWO_FLOWS);
+  const script = JSON.stringify({ 'shows "Hello"': ['pass', 'fail', 'pass'], 'Each pays': ['fail', 'pass'] });
+  // the agent changes nothing, so the app fingerprint stays identical between iterations
+  const cfg = JSON.parse(readFileSync(join(dir, 'kane-loop.json'), 'utf8'));
+  cfg.agent = 'node -e "0"';
+  writeFileSync(join(dir, 'kane-loop.json'), JSON.stringify(cfg));
+  const r = cli(dir, ['fix'], { FAKE_KANE_SCRIPT: script });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /greeting: Kane says failed, but this exact code \([0-9a-f]{12}\) passed it before — re-checking \(1\/2\)/);
+  assert.match(r.out, /VERIFIED 2\/2 after 1 agent pass/);
+  const hist = JSON.parse(readFileSync(join(dir, '.kane-loop', 'history.json'), 'utf8')).history;
+  assert.equal(hist[1].flows.greeting, 'passed (re-run 1)');
+  assert.equal(hist[0].appFingerprint, hist[1].appFingerprint);
+});
+
+test('fix: a flow whose verdict keeps flipping on identical code goes to a human, not the agent', () => {
+  const dir = project(TWO_FLOWS, '<h1>Hello</h1><p>Each pays 30.00</p>');
+  const script = JSON.stringify({ 'shows "Hello"': ['pass', 'fail', 'fail', 'fail'], 'Each pays': ['fail', 'pass'] });
+  const cfg = JSON.parse(readFileSync(join(dir, 'kane-loop.json'), 'utf8'));
+  cfg.agent = 'node -e "0"';
+  writeFileSync(join(dir, 'kane-loop.json'), JSON.stringify(cfg));
+  const r = cli(dir, ['fix'], { FAKE_KANE_SCRIPT: script });
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /kane_loop.nondeterministic/);
+  assert.match(r.out, /a human should look at the evidence/);
+});

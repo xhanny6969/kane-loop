@@ -21,6 +21,26 @@ if (process.env.FAKE_KANE_FLAKY_ONCE === '1' && !existsSync(marker)) {
   emit({ type: 'run_end', status: 'failed', reason: 'Screenshot failed: TargetClosedError', result_code: 510, reason_code: 'infra_error.screenshot_failed', verdict: { confirmed: false, family: 'environment_issue', bug_title: 'Browser session closed before screenshot capture' } });
   process.exit(1);
 }
+// FAKE_KANE_SCRIPT='{"<objective substring>": ["pass","fail",...]}' forces outcomes in order
+if (process.env.FAKE_KANE_SCRIPT) {
+  const script = JSON.parse(process.env.FAKE_KANE_SCRIPT);
+  const key = Object.keys(script).find(k => objective.includes(k));
+  if (key) {
+    const { readFileSync } = await import('node:fs');
+    const counter = `.script-${createHash('md5').update(key).digest('hex').slice(0, 8)}`;
+    const n = existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0;
+    writeFileSync(counter, String(n + 1));
+    const outcome = script[key][Math.min(n, script[key].length - 1)];
+    emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
+    if (outcome === 'pass') {
+      emit({ type: 'run_end', status: 'passed', one_liner: `scripted pass #${n + 1}`, result_code: 100 });
+      process.exit(0);
+    }
+    emit({ step: 2, status: 'failed', remark: `assert: scripted failure #${n + 1}` });
+    emit({ type: 'run_end', status: 'failed', reason: 'scripted', result_code: 740, verdict: { confirmed: true, family: 'application_issue', bug_title: `Scripted bug #${n + 1}` } });
+    process.exit(1);
+  }
+}
 if (process.env.FAKE_KANE_BLOCKED === '1') {
   emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
   emit({ type: 'run_end', status: 'failed', reason: 'CAPTCHA challenge', result_code: 610, reason_code: 'blocker.captcha' });
