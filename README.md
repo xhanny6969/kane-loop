@@ -14,17 +14,11 @@ flows.md ──▶ Kane CLI (real Chrome) ──▶ ✗ failures ──▶ FIX_R
 ## Quickstart
 
 ```bash
-npm install -g @testmuai/kane-cli      # Kane CLI
-kane-cli login                         # TestMu AI account (free credits)
-git clone https://github.com/xhanny6969/kane-loop && cd kane-loop
-npm test                               # 17 tests, no credits needed (Kane + agent test doubles)
-```
+npm install -g @testmuai/kane-cli github:xhanny6969/kane-loop   # Kane CLI + kane-loop (no git? use https://github.com/xhanny6969/kane-loop/archive/refs/heads/main.tar.gz)
+kane-cli login                                                  # TestMu AI account (free credits)
 
-Point it at your own project:
-
-```bash
 cd my-app
-node /path/to/kane-loop/bin/kane-loop.mjs init      # writes flows.md + kane-loop.json
+kane-loop init                                      # writes flows.md + kane-loop.json
 # edit flows.md: one "## heading" per user flow, plain English underneath
 kane-loop verify                                    # Kane runs every flow, exit 0 only if all pass
 kane-loop fix --agent claude                        # loop until green (hermes | claude | codex | gemini | kiro)
@@ -32,7 +26,15 @@ kane-loop gate -- npx wrangler pages deploy dist    # deploy only if every flow 
 kane-loop calibrate --runs 3                        # is each flow's verdict stable enough to trust?
 ```
 
-Node 20+, zero dependencies.
+Try it without spending credits, or replay the demo:
+
+```bash
+git clone https://github.com/xhanny6969/kane-loop && cd kane-loop
+npm test                                            # 17 tests against a fake kane-cli and a fake agent
+cd examples/splitbill && node ../../bin/kane-loop.mjs verify   # 4 real Kane runs against the built demo app
+```
+
+Node 20+, zero dependencies. Developed and recorded on Windows 11; the macOS/Linux code paths are not tested yet.
 
 ## The spec: `flows.md`
 
