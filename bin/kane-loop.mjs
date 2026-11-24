@@ -33,6 +33,9 @@ Options
   --bug-detection <m>   off | stop | continue (passed to Kane)
   --max-iter <n>        agent passes before giving up (default 5)
   --retries <n>         re-runs for Kane infrastructure errors, never sent to the agent (default 2)
+  --stall-timeout <s>   kill a Kane run that prints nothing for this long (default 600)
+  --error-grace <s>     kill a Kane run that reported an internal error but never ended (default 90)
+  --launch-gap <s>      parallel: max wait for one run's browser before starting the next (default 45)
   --runs <n>            calibrate: runs per flow (default 3)
   --commit              git commit after every agent pass and on green
   --agent-timeout <s>   kill the agent after this long (default 900)
@@ -42,7 +45,7 @@ Options
 Exit codes: 0 verified · 1 flows still failing · 2 stopped for a non-app reason (auth, credits, url, Chrome, captcha, Kane infra)`;
 
 const FLAGS = new Set(['headed', 'commit', 'quiet-agent', 'help', 'version']);
-const NUMS = new Set(['parallel', 'max-steps', 'timeout', 'max-iter', 'agent-timeout', 'port', 'serve-timeout', 'retries', 'runs']);
+const NUMS = new Set(['parallel', 'max-steps', 'timeout', 'max-iter', 'agent-timeout', 'port', 'serve-timeout', 'retries', 'runs', 'stall-timeout', 'error-grace', 'launch-gap']);
 const camel = s => s.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
 
 function parse(argv) {

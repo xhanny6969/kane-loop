@@ -217,3 +217,22 @@ test('calibrate: every flow stable -> exit 0', () => {
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /safe to gate on/);
 });
+
+test('verify: a Kane run that hangs after an internal error is killed and re-run, never blamed on the app', () => {
+  const dir = project(TWO_FLOWS, '<h1>Hello</h1><p>Each pays 30.00</p>');
+  const t0 = Date.now();
+  const r = cli(dir, ['verify', '--error-grace', '2'], { FAKE_KANE_HANG_ONCE: '1' });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /stopped responding/);
+  assert.match(r.out, /re-running on its own/);
+  assert.ok(Date.now() - t0 < 30000, 'watchdog must fire well before the test timeout');
+});
+
+test('verify --parallel: the next Kane run starts only after the previous one has its browser', () => {
+  const dir = project(TWO_FLOWS, '<h1>Hello</h1><p>Each pays 30.00</p>');
+  const log = join(dir, 'launch.log');
+  const r = cli(dir, ['verify', '--parallel', '2'], { FAKE_KANE_LAUNCH_LOG: log, FAKE_KANE_LAUNCH_MS: '400', FAKE_KANE_RUN_MS: '800' });
+  assert.equal(r.code, 0, r.out);
+  const order = readFileSync(log, 'utf8').trim().split(/\r?\n/).map(l => l.split(' ')[0]);
+  assert.deepEqual(order, ['start', 'step', 'start', 'step'], `launches overlapped: ${order.join(',')}`);
+});

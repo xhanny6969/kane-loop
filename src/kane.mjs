@@ -2,7 +2,7 @@
 // Stream contract: https://www.testmuai.com/docs/kane-cli-agent-mode
 //   exit 0 passed | 1 ran and did not pass | 2 never started (auth, url, chrome) | 3 cancelled / --timeout
 
-import { spawn, execSync } from 'node:child_process';
+import { spawn, spawnSync, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -90,6 +90,16 @@ export function classify(exitCode, end) {
   return end ? 'failed' : 'error';
 }
 
+// Kill Kane and everything it started (its Chrome included).
+function killTree(child) {
+  if (!child.pid) return;
+  if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+  else { try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { /* gone */ } } }
+}
+
+// A Kane event that means its browser is up and the run has started driving it.
+const isLaunched = e => typeof e.step === 'number' || e.type === 'bifurcation' || e.type === 'run_end';
+
 export function runKane(flow, opts = {}) {
   const { cmd, pre } = resolveKane();
   const url = flow.url || opts.url;
@@ -103,26 +113,62 @@ export function runKane(flow, opts = {}) {
   if (opts.bugDetection) args.push('--bug-detection', opts.bugDetection);
   if (opts.extraArgs?.length) args.push(...opts.extraArgs);
 
+  // Watchdog. Kane CLI 0.10.8 can stay alive forever after an internal error (seen: TargetClosedError,
+  // then no run_end and no exit for 1h47m). kane-loop kills it and reports a Kane hang, never an app bug.
+  const stallSec = opts.stallSec ?? 600;          // no output at all for this long
+  const errorGraceSec = opts.errorGraceSec ?? 90; // an {"type":"error"} event with no run_end after this long
+
   return new Promise(resolve => {
     const t0 = Date.now();
     let out = '';
     let err = '';
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let buf = '';
+    let launched = false;
+    let hung = null;
+    let sawEnd = false;
+    let errorAt = 0;
+    let lastData = Date.now();
+    const launch = () => { if (!launched) { launched = true; opts.onLaunched?.(); } };
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (errorAt && !sawEnd && now - errorAt > errorGraceSec * 1000) hung = `Kane CLI reported an internal error and then stopped responding for ${errorGraceSec}s`;
+      else if (now - lastData > stallSec * 1000) hung = `Kane CLI produced no output for ${stallSec}s`;
+      if (hung) { clearInterval(timer); killTree(child); }
+    }, Math.min(1000, errorGraceSec * 250, stallSec * 250));
     child.stdout.on('data', d => {
       out += d;
-      if (opts.onEvent) {
-        for (const e of parseNdjson(String(d))) opts.onEvent(e);
+      lastData = Date.now();
+      buf += d;
+      const cut = buf.lastIndexOf('\n');
+      if (cut < 0) return;
+      const events = parseNdjson(buf.slice(0, cut));
+      buf = buf.slice(cut + 1);
+      for (const e of events) {
+        if (isLaunched(e)) launch();
+        if (e.type === 'run_end') sawEnd = true;
+        if (e.type === 'error' && !errorAt) errorAt = Date.now();
+        opts.onEvent?.(e);
       }
     });
-    child.stderr.on('data', d => { err += d; });
+    child.stderr.on('data', d => { err += d; lastData = Date.now(); });
     child.on('error', e => {
+      clearInterval(timer);
+      launch();
       resolve({ flow: flow.name, title: flow.title, objective: flow.objective, url, ...summarize([], 2),
         reason: `could not launch Kane CLI (${e.code || e.message}). Install it: npm i -g @testmuai/kane-cli`, wallSec: 0 });
     });
     child.on('close', code => {
+      clearInterval(timer);
+      launch();
       const events = parseNdjson(out);
-      const res = { flow: flow.name, title: flow.title, objective: flow.objective, url, ...summarize(events, code ?? 1),
+      let res = { flow: flow.name, title: flow.title, objective: flow.objective, url, ...summarize(events, code ?? 1),
         wallSec: Math.round((Date.now() - t0) / 100) / 10, stderrTail: err.split(/\r?\n/).filter(Boolean).slice(-8).join('\n') };
+      if (hung) {
+        const last = events.filter(e => e.type === 'error').map(e => e.message).at(-1);
+        res = { ...res, verdict: 'flaky', reasonCode: 'kane_loop.kane_hung', hung: true,
+          reason: `${hung.replace('Kane CLI ', '')}${last ? ` (${last})` : ''}; killed by kane-loop` };
+      }
       if (opts.logDir) {
         mkdirSync(opts.logDir, { recursive: true });
         writeFileSync(join(opts.logDir, `${flow.name}.ndjson`), out);
@@ -133,15 +179,31 @@ export function runKane(flow, opts = {}) {
   });
 }
 
+// Parallel runs start one at a time: the next Kane process is spawned only after the previous one's
+// browser is up. Kane picks its CDP port by probing 127.0.0.1:9222-9230 for a free port, but Chrome on
+// Windows falls back to [::1] when 127.0.0.1 is taken. Two runs that start together therefore pick the
+// same port and both drive ONE Chrome: they type over each other's inputs, and when the first finishes
+// it closes the page under the second (TargetClosedError). Reproduced with plain Chrome: see README.
 export async function runAll(flows, opts = {}) {
   const parallel = Math.max(1, opts.parallel || 1);
+  const gapSec = opts.launchGapSec ?? 45;
   const results = new Array(flows.length);
   let next = 0;
+  let gate = Promise.resolve();
   async function worker() {
     while (next < flows.length) {
       const i = next++;
+      let release;
+      const mine = new Promise(r => { release = r; });
+      const prev = gate;
+      gate = prev.then(() => mine);
+      await prev;
+      const cap = setTimeout(() => release(), gapSec * 1000);
       opts.onStart?.(flows[i], i);
-      results[i] = await runKane(flows[i], opts);
+      const p = runKane(flows[i], { ...opts, onLaunched: () => { clearTimeout(cap); release(); opts.onLaunched?.(flows[i], i); } });
+      results[i] = await p;
+      clearTimeout(cap);
+      release();
       opts.onDone?.(results[i], i);
     }
   }

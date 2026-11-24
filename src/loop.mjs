@@ -79,6 +79,7 @@ async function verifyOnce(cfg, doc, runDir, label, memory = { passedOn: new Map(
   const opts = {
     url: cfg.url, headed: cfg.headed, maxSteps: cfg.maxSteps, timeout: cfg.timeout, parallel: cfg.parallel,
     bugDetection: cfg.bugDetection, cwd: cfg.cwd, logDir: runDir, extraArgs: cfg.kaneArgs,
+    stallSec: cfg.stallTimeout, errorGraceSec: cfg.errorGrace, launchGapSec: cfg.launchGap,
   };
   const results = await runAll(flows, { ...opts, onDone: r => say(line(r)) });
   // Kane infrastructure hiccups (screenshot failed, browser crashed, Kane agent error) are not
@@ -271,7 +272,8 @@ export async function calibrate(cfg) {
   const fp = fingerprint(appDir);
   const dir = stateDir(cfg);
   const base = join(dir, 'runs', `calibrate-${stamp()}`);
-  const opts = { url: cfg.url, headed: cfg.headed, maxSteps: cfg.maxSteps, timeout: cfg.timeout, parallel: cfg.parallel, bugDetection: cfg.bugDetection, cwd: cfg.cwd, extraArgs: cfg.kaneArgs };
+  const opts = { url: cfg.url, headed: cfg.headed, maxSteps: cfg.maxSteps, timeout: cfg.timeout, parallel: cfg.parallel, bugDetection: cfg.bugDetection, cwd: cfg.cwd, extraArgs: cfg.kaneArgs,
+    stallSec: cfg.stallTimeout, errorGraceSec: cfg.errorGrace, launchGapSec: cfg.launchGap };
   const all = Object.fromEntries(flows.map(f => [f.name, []]));
   setNameWidth(flows.map(f => f.name));
 

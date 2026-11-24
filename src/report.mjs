@@ -15,7 +15,7 @@ export function setNameWidth(names) { nameWidth = Math.max(12, ...names.map(n =>
 export function line(r) {
   const paint = PAINT[r.verdict] || (s => s);
   const credits = r.credits != null ? `${Math.round(r.credits * 10) / 10} cr` : '';
-  const why = r.verdict === 'passed' ? (r.oneLiner || r.reason || '') : (r.bug?.bug_title ? `bug: ${r.bug.bug_title}` : (r.failedSteps.at(-1) || r.reason || ''));
+  const why = r.verdict === 'passed' ? (r.oneLiner || r.reason || '') : r.hung ? `Kane hung: ${r.reason}` : (r.bug?.bug_title ? `bug: ${r.bug.bug_title}` : (r.failedSteps.at(-1) || r.reason || ''));
   const tag = r.retried ? color.dim(` (retry ${r.retried})`) : '';
   return `  ${paint(`${ICON[r.verdict] || '?'} ${r.verdict.toUpperCase().padEnd(7)}`)} ${color.bold(r.flow.padEnd(nameWidth))} ${color.dim(`${r.wallSec ?? '-'}s ${credits}`.padEnd(14))} ${clip(why, 80)}${tag}`;
 }

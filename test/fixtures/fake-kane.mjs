@@ -14,6 +14,22 @@ const objective = argv[1] || '';
 import { existsSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 const marker = `.flaky-${createHash('md5').update(objective).digest('hex').slice(0, 8)}`;
+const { appendFileSync } = await import('node:fs');
+const tag = (objective.match(/\"([^\"]+)\"/) || [, objective.slice(0, 12)])[1];
+const launchLog = process.env.FAKE_KANE_LAUNCH_LOG;
+if (launchLog) appendFileSync(launchLog, `start ${tag}\n`);
+// Kane needs a moment to launch Chrome before its first step event
+if (process.env.FAKE_KANE_LAUNCH_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_KANE_LAUNCH_MS)));
+// FAKE_KANE_HANG_ONCE=1: what Kane CLI 0.10.8 did for real: internal error event, then no run_end and no exit
+const hangMarker = `.flaky-hang-${createHash('md5').update(objective).digest('hex').slice(0, 8)}`;
+if (process.env.FAKE_KANE_HANG_ONCE === '1' && !existsSync(hangMarker)) {
+  writeFileSync(hangMarker, '1');
+  emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
+  emit({ step: 2, status: 'failed', remark: 'agent_info: The run stopped on an internal error (TargetClosedError).' });
+  emit({ type: 'error', message: 'new_cdp_session: Target page, context or browser has been closed' });
+  setInterval(() => {}, 1 << 30);
+  await new Promise(() => {});
+}
 if (process.env.FAKE_KANE_FLAKY_ONCE === '1' && !existsSync(marker)) {
   writeFileSync(marker, '1');
   emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
@@ -50,6 +66,8 @@ const url = argv[argv.indexOf('--url') + 1];
 emit({ type: 'stream_start', cli_version: '0.0.0-fake', surface: 'run', pid: process.pid });
 process.stdout.write('not json, should be ignored\n');
 emit({ step: 1, status: 'running', remark: 'Step 1' });
+if (launchLog) appendFileSync(launchLog, `step ${tag}\n`);
+if (process.env.FAKE_KANE_RUN_MS) await new Promise(r => setTimeout(r, Number(process.env.FAKE_KANE_RUN_MS)));
 emit({ step: 1, status: 'done', remark: `navigate: ${url}` });
 
 const wanted = [...(objective.split(/verify/i)[1] || '').matchAll(/"([^"]+)"/g)].map(m => m[1]);
