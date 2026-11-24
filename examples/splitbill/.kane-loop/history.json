@@ -15,6 +15,20 @@
         "cents-add-up-exactly": "failed",
         "zero-people-is-rejected": "failed"
       }
+    },
+    {
+      "iteration": 1,
+      "passed": 4,
+      "total": 4,
+      "appFingerprint": "ca8d8f0caa09",
+      "specViolation": false,
+      "at": "2026-11-24T05:16:03.064Z",
+      "flows": {
+        "even-split": "passed",
+        "tip-is-added-before-splitting": "passed",
+        "cents-add-up-exactly": "passed",
+        "zero-people-is-rejected": "passed"
+      }
     }
   ]
 }
