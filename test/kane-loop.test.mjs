@@ -147,6 +147,9 @@ test('classify: result-code ranges decide who has to act', () => {
   assert.equal(classify(1, end(610)), 'blocked');
   assert.equal(classify(1, end(560)), 'error');
   assert.equal(classify(2, undefined), 'error');
+  // Kane's own triage: the assertion misread a correct page -> not the app's fault
+  assert.equal(classify(1, { type: 'run_end', status: 'failed', result_code: 710, verdict: { confirmed: false, family: 'automation_bug' } }), 'flaky');
+  assert.equal(classify(1, { type: 'run_end', status: 'failed', result_code: 740, verdict: { confirmed: true, family: 'application_issue' } }), 'failed');
 });
 
 test('verify: a Kane infra error is re-run on its own, not reported as an app failure', () => {
