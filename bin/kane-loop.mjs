@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fix, gate, verify } from '../src/loop.mjs';
+import { calibrate, fix, gate, verify } from '../src/loop.mjs';
 import { serveStatic } from '../src/serve.mjs';
 
 const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'));
@@ -14,6 +14,7 @@ Usage
   kane-loop verify [options]             run every flow in Kane CLI, exit 0 only if all pass
   kane-loop fix --agent <a> [options]    verify → hand failures to the agent → re-verify, until green
   kane-loop gate [options] -- <cmd>      run <cmd> (deploy, publish, merge) only if every flow passes
+  kane-loop calibrate [--runs 3]         run every flow N times on identical code; report how stable Kane's verdicts are
   kane-loop static <dir> [--port 4173]   zero-dependency no-cache static server for the app under test
 
 Agents (--agent)
@@ -32,6 +33,7 @@ Options
   --bug-detection <m>   off | stop | continue (passed to Kane)
   --max-iter <n>        agent passes before giving up (default 5)
   --retries <n>         re-runs for Kane infrastructure errors, never sent to the agent (default 2)
+  --runs <n>            calibrate: runs per flow (default 3)
   --commit              git commit after every agent pass and on green
   --agent-timeout <s>   kill the agent after this long (default 900)
   --quiet-agent         do not stream agent output
@@ -40,7 +42,7 @@ Options
 Exit codes: 0 verified · 1 flows still failing · 2 stopped for a non-app reason (auth, credits, url, Chrome, captcha, Kane infra)`;
 
 const FLAGS = new Set(['headed', 'commit', 'quiet-agent', 'help', 'version']);
-const NUMS = new Set(['parallel', 'max-steps', 'timeout', 'max-iter', 'agent-timeout', 'port', 'serve-timeout', 'retries']);
+const NUMS = new Set(['parallel', 'max-steps', 'timeout', 'max-iter', 'agent-timeout', 'port', 'serve-timeout', 'retries', 'runs']);
 const camel = s => s.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
 
 function parse(argv) {
@@ -115,10 +117,11 @@ async function main() {
   if (cmd === 'verify') return verify(cfg);
   if (cmd === 'fix') return fix(cfg);
   if (cmd === 'gate') return gate(cfg, rest?.join(' '));
+  if (cmd === 'calibrate') return calibrate(cfg);
   throw new Error(`unknown command "${cmd}" (try --help)`);
 }
 
 main().then(code => { if (typeof code === 'number') process.exitCode = code; }, e => {
   console.error(`kane-loop: ${e.message}`);
-  process.exitCode = 2;
+  process.exitCode = e.exitCode ?? 2;
 });

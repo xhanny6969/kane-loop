@@ -196,3 +196,24 @@ test('fix: a flow whose verdict keeps flipping on identical code goes to a human
   assert.match(r.out, /kane_loop.nondeterministic/);
   assert.match(r.out, /a human should look at the evidence/);
 });
+
+test('calibrate: same code, same flow, different verdicts -> reported as unstable (exit 2)', () => {
+  const dir = project(TWO_FLOWS, '<h1>Hello</h1><p>Each pays 30.00</p>');
+  const script = JSON.stringify({ 'shows "Hello"': ['pass', 'fail', 'pass'], 'Each pays': ['pass'] });
+  const r = cli(dir, ['calibrate', '--runs', '3'], { FAKE_KANE_SCRIPT: script });
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /✓✗✓\s+greeting\s+UNSTABLE\s+2\/3/);
+  assert.match(r.out, /✓✓✓\s+total\s+STABLE-PASS\s+3\/3/);
+  assert.match(r.out, /5\/6 runs agreed/);
+  assert.match(r.out, /1 "confirmed" bug\(s\) on a flow that also passed/);
+  const cal = JSON.parse(readFileSync(join(dir, '.kane-loop', 'calibration.json'), 'utf8'));
+  assert.equal(cal.flows[0].cls, 'unstable');
+  assert.equal(cal.falseConfirmed, 1);
+});
+
+test('calibrate: every flow stable -> exit 0', () => {
+  const dir = project(TWO_FLOWS, '<h1>Hello</h1><p>Each pays 30.00</p>');
+  const r = cli(dir, ['calibrate', '--runs', '2']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /safe to gate on/);
+});

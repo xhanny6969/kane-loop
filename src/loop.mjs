@@ -247,3 +247,82 @@ export async function gate(cfg, command) {
 
 function read(p) { try { return readFileSync(p, 'utf8'); } catch { return null; } }
 function stamp() { return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); }
+
+// calibrate: run every flow N times on the same code and measure how stable Kane's verdict is.
+// A flow you cannot trust to give the same answer twice should not be gating a deploy or steering an agent.
+export function stability(outcomes) {
+  const passes = outcomes.filter(v => v === 'passed').length;
+  const fixable = outcomes.filter(v => AGENT_FIXABLE.has(v)).length;
+  const n = outcomes.length;
+  let cls;
+  if (passes === n) cls = 'stable-pass';
+  else if (fixable === n) cls = 'stable-fail';
+  else if (passes > 0) cls = 'unstable';
+  else cls = 'noisy';
+  const majority = Math.max(passes, n - passes);
+  return { cls, passes, n, agreement: majority / n };
+}
+
+export async function calibrate(cfg) {
+  const doc = loadFlows(resolve(cfg.cwd, cfg.flows));
+  const flows = cfg.only?.length ? doc.flows.filter(f => cfg.only.includes(f.name)) : doc.flows;
+  const runs = Math.max(2, cfg.runs || 3);
+  const appDir = resolve(cfg.cwd, cfg.watch || '.');
+  const fp = fingerprint(appDir);
+  const dir = stateDir(cfg);
+  const base = join(dir, 'runs', `calibrate-${stamp()}`);
+  const opts = { url: cfg.url, headed: cfg.headed, maxSteps: cfg.maxSteps, timeout: cfg.timeout, parallel: cfg.parallel, bugDetection: cfg.bugDetection, cwd: cfg.cwd, extraArgs: cfg.kaneArgs };
+  const all = Object.fromEntries(flows.map(f => [f.name, []]));
+  setNameWidth(flows.map(f => f.name));
+
+  await withServer(cfg, async () => {
+    say(`\n${color.cyan('▶ Kane CLI calibrate')} ${color.dim(`· ${flows.length} flow(s) × ${runs} runs on identical code (app ${fp})`)}`);
+    for (let round = 1; round <= runs; round++) {
+      say(color.dim(`  round ${round}/${runs}`));
+      // round-robin, so a slow or broken minute on the machine hits every flow, not one
+      const results = await runAll(flows, { ...opts, logDir: join(base, `round-${round}`), onDone: r => say(line(r)) });
+      for (const r of results) all[r.flow].push(r);
+      if (results.some(r => r.verdict === 'error')) { explainError(results); throw Object.assign(new Error('Kane could not start; calibration aborted'), { exitCode: 2 }); }
+      const now = fingerprint(appDir);
+      if (now !== fp) throw Object.assign(new Error(`app files changed during calibration (${fp} → ${now}); results discarded`), { exitCode: 2 });
+    }
+  });
+
+  const MARK = { passed: '✓', failed: '✗', timeout: '⏱', flaky: '↻', blocked: '⊘', error: '!' };
+  const rows = flows.map(f => {
+    const rs = all[f.name];
+    const st = stability(rs.map(r => r.verdict));
+    const noise = rs.filter(r => r.verdict !== 'passed').map(r => `${r.resultCode ?? r.verdict}${r.bug?.family ? ` ${r.bug.family}` : ''}${r.bug?.confirmed ? ' (confirmed)' : ''}`);
+    const avg = k => { const xs = rs.map(r => r[k]).filter(x => typeof x === 'number'); return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null; };
+    return { flow: f.name, title: f.title, ...st, marks: rs.map(r => MARK[r.verdict] || '?').join(''), noise, avgDuration: avg('duration'), avgCredits: avg('credits'),
+      runs: rs.map(r => ({ verdict: r.verdict, resultCode: r.resultCode, reasonCode: r.reasonCode, family: r.bug?.family, confirmed: r.bug?.confirmed, bugTitle: r.bug?.bug_title, credits: r.credits, testUrl: r.testUrl })) };
+  });
+
+  const paint = { 'stable-pass': color.green, 'stable-fail': color.red, unstable: color.yellow, noisy: color.yellow };
+  say(`\n${color.bold('Verdict stability')} ${color.dim(`(app ${fp}, ${runs} runs per flow)`)}`);
+  for (const r of rows) {
+    say(`  ${r.marks.padEnd(runs + 1)} ${color.bold(r.flow.padEnd(30))} ${paint[r.cls](r.cls.toUpperCase().padEnd(12))} ${`${r.passes}/${r.n}`.padEnd(5)} ${color.dim(r.noise.length ? r.noise.join(', ') : `${r.avgDuration ?? '-'}s, ${r.avgCredits ?? '-'} cr avg`)}`);
+  }
+  const totalRuns = rows.reduce((a, r) => a + r.n, 0);
+  const agreeing = rows.reduce((a, r) => a + Math.round(r.agreement * r.n), 0);
+  const nonApp = rows.flatMap(r => r.runs).filter(x => x.verdict !== 'passed' && !(x.confirmed && x.family === 'application_issue')).length;
+  const falseConfirmed = rows.filter(r => r.cls === 'unstable').flatMap(r => r.runs).filter(x => x.confirmed && x.family === 'application_issue').length;
+  const credits = Math.round(rows.flatMap(r => r.runs).reduce((a, x) => a + (x.credits || 0), 0) * 10) / 10;
+  say(`\n  ${agreeing}/${totalRuns} runs agreed with their flow's majority verdict · ${nonApp} non-app failure(s) · ${falseConfirmed} "confirmed" bug(s) on a flow that also passed · ${credits} credits`);
+  const unstable = rows.filter(r => r.cls === 'unstable' || r.cls === 'noisy');
+  const failing = rows.filter(r => r.cls === 'stable-fail');
+  if (unstable.length) say(color.yellow(`  ! not gate-worthy yet: ${unstable.map(r => r.flow).join(', ')} — tighten the objective (see https://www.testmuai.com/docs/kane-cli-writing-objectives) or raise --retries`));
+  if (failing.length) say(color.red(`  ✗ consistently failing (a real bug, or a wrong spec): ${failing.map(r => r.flow).join(', ')}`));
+  if (!unstable.length && !failing.length) say(color.green(`  ✓ every flow gave the same answer ${runs}/${runs} times — safe to gate on`));
+
+  const report = { calibratedAt: new Date().toISOString(), appFingerprint: fp, flowsSha256: doc.sha256, runsPerFlow: runs, parallel: cfg.parallel || 1,
+    kaneCliVersion: rows.flatMap(r => all[r.flow]).find(r => r.kaneVersion)?.kaneVersion, agreement: `${agreeing}/${totalRuns}`, nonAppFailures: nonApp, falseConfirmed, credits, flows: rows };
+  writeFileSync(join(dir, 'calibration.json'), JSON.stringify(report, null, 2) + '\n');
+  const md = ['# kane-loop calibration', '', `- App fingerprint: \`${fp}\` · ${runs} runs per flow · parallel ${report.parallel} · Kane CLI ${report.kaneCliVersion || '?'}`,
+    `- ${agreeing}/${totalRuns} runs agreed with their flow's majority · ${nonApp} non-app failure(s) · ${falseConfirmed} false "confirmed" bug(s) · ${credits} credits`, '',
+    '| Flow | Runs | Class | Passed | Non-pass verdicts |', '|---|---|---|---|---|',
+    ...rows.map(r => `| ${r.title} | ${r.marks} | ${r.cls} | ${r.passes}/${r.n} | ${r.noise.join(', ') || '—'} |`), ''];
+  writeFileSync(join(dir, 'calibration.md'), md.join('\n'));
+  say(color.dim(`  → .kane-loop/calibration.json, .kane-loop/calibration.md`));
+  return failing.length ? 1 : unstable.length ? 2 : 0;
+}
